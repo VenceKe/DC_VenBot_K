@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>大逃殺 - Battle Royale</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: 'Courier New', monospace; background: #1a1a2e; color: #e0e0e0; min-height: 100vh; }
+#game { max-width: 900px; margin: 0 auto; padding: 20px; }
+h1 { text-align: center; color: #e94560; margin-bottom: 10px; font-size: 1.8em; }
+.status-bar { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 15px; padding: 10px; background: #16213e; border: 1px solid #0f3460; border-radius: 5px; }
+.status-bar div { font-size: 0.9em; }
+.hp { color: #4ecca3; } .sp { color: #f9d923; } .atk { color: #e94560; } .def { color: #4a90d9; }
+.bar { height: 8px; background: #333; border-radius: 4px; margin-top: 3px; }
+.bar-fill { height: 100%; border-radius: 4px; transition: width 0.3s; }
+.bar-hp .bar-fill { background: #4ecca3; } .bar-sp .bar-fill { background: #f9d923; }
+#log { background: #0f0f23; border: 1px solid #333; border-radius: 5px; padding: 10px; height: 300px; overflow-y: auto; margin-bottom: 15px; font-size: 0.85em; line-height: 1.6; }
+#log .msg-system { color: #f9d923; } #log .msg-combat { color: #e94560; } #log .msg-item { color: #4ecca3; } #log .msg-danger { color: #ff6b6b; } #log .msg-info { color: #a0a0a0; }
+#actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 15px; }
+#actions button { padding: 12px; background: #16213e; border: 1px solid #0f3460; color: #e0e0e0; border-radius: 5px; cursor: pointer; font-size: 0.9em; transition: all 0.2s; }
+#actions button:hover:not(:disabled) { background: #0f3460; border-color: #4ecca3; }
+#actions button:disabled { opacity: 0.4; cursor: not-allowed; }
+#move-select { width: 100%; padding: 10px; background: #16213e; border: 1px solid #0f3460; color: #e0e0e0; border-radius: 5px; margin-bottom: 10px; font-size: 0.9em; }
+#survivors { background: #16213e; border: 1px solid #0f3460; border-radius: 5px; padding: 10px; font-size: 0.8em; }
+#survivors h3 { color: #4a90d9; margin-bottom: 5px; }
+.dead { color: #666; text-decoration: line-through; }
+.zone-danger { color: #ff6b6b; } .zone-safe { color: #4ecca3; }
+#inventory { background: #16213e; border: 1px solid #0f3460; border-radius: 5px; padding: 10px; margin-bottom: 15px; font-size: 0.85em; }
+#inventory h3 { color: #f9d923; margin-bottom: 5px; }
+#game-over { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.85); justify-content: center; align-items: center; flex-direction: column; z-index: 100; }
+#game-over h2 { font-size: 3em; margin-bottom: 20px; }
+#game-over button { padding: 15px 40px; font-size: 1.2em; background: #e94560; border: none; color: white; border-radius: 5px; cursor: pointer; }
+.winner { color: #4ecca3; } .loser { color: #e94560; }
+</style>
+</head>
+<body>
+<div id="game">
+<h1>⚔️ 大逃殺 Battle Royale ⚔️</h1>
+<div class="status-bar">
+<div>📍 位置：<span id="location">-</span></div>
+<div>👥 存活：<span id="alive-count">-</span></div>
+<div class="hp">❤️ 生命：<span id="hp">-</span> <div class="bar bar-hp"><div class="bar-fill" id="hp-bar"></div></div></div>
+<div class="sp">⚡ 體力：<span id="sp">-</span> <div class="bar bar-sp"><div class="bar-fill" id="sp-bar"></div></div></div>
+<div class="atk">⚔️ 攻擊：<span id="atk">-</span></div>
+<div class="def">🛡️ 防禦：<span id="def">-</span></div>
+<div>🗡️ 武器：<span id="weapon">-</span></div>
+<div>🎯 熟練：<span id="prof">-</span></div>
+</div>
+<div id="inventory"><h3>🎒 背包</h3><div id="inv-list">空</div></div>
+<div id="log"></div>
+<select id="move-select"></select>
+<div id="actions">
+<button id="btn-move" onclick="doMove()">🚶 移動</button>
+<button id="btn-explore" onclick="doExplore()">🔍 探索</button>
+<button id="btn-rest" onclick="doRest()">💤 休息</button>
+<button id="btn-use" onclick="doUseItem()">💊 使用道具</button>
+</div>
+<div id="survivors"><h3>📋 戰況</h3><div id="surv-list"></div></div>
+</div>
+<div id="game-over"><h2 id="go-text"></h2><button onclick="location.reload()">再來一局</button></div>
+
+<script>
+const ZONES = ['廢棄醫院','森林小屋','海岸碼頭','山頂神社','商店街','學校','發電廠','地下隧道','公園廣場','軍事基地'];
+const WEAPONS = [
+{name:'小刀',atk:8,prof:'斬'},{name:'球棒',atk:12,prof:'殴'},{name:'手槍',atk:18,prof:'射'},
+{name:'步槍',atk:25,prof:'射'},{name:'武士刀',atk:22,prof:'斬'},{name:'鐵管',atk:10,prof:'殴'},
+{name:'弓箭',atk:15,prof:'投'},{name:'手榴彈',atk:30,prof:'爆'}
+];
+const ITEMS = [
+{name:'繃帶',type:'heal',val:20},{name:'急救包',type:'heal',val:50},{name:'能量飲料',type:'sp',val:30},
+{name:'便當',type:'sp',val:50},{name:'防彈衣',type:'def',val:10},{name:'頭盔',type:'def',val:5}
+];
+const NAMES = ['影狼','赤鬼','蒼龍','白虎','玄武','朱雀','銀狐','黑豹','金鷹','雷神','風魔','冰姬','炎帝','月讀','星辰'];
+
+let player, bots, turn, dangerZones, nextDanger, gameOver;
+
+function init() {
+  gameOver = false; turn = 0; dangerZones = []; nextDanger = 8;
+  player = { name: '你', hp: 100, maxHp: 100, sp: 100, maxSp: 100, atk: 10, def: 5, zone: randZone(), weapon: null, prof: 0, inv: [], alive: true };
+  bots = [];
+  for (let i = 0; i < 12; i++) {
+    bots.push({ name: NAMES[i], hp: 80+rand(40), maxHp: 80+rand(40), sp: 80, maxSp: 80, atk: 8+rand(10), def: 3+rand(8), zone: randZone(), weapon: rand(3)>0?WEAPONS[rand(WEAPONS.length)]:null, prof: rand(30), inv: [], alive: true });
+  }
+  log('═══ 遊戲開始！大逃殺倒數計時 ═══','system');
+  log(`你被投放到【${player.zone}】，共 ${bots.length+1} 人參戰。`, 'system');
+  log('存活到最後就是勝利者！','system');
+  updateUI();
+}
+
+function rand(n) { return Math.floor(Math.random()*n); }
+function randZone() { return ZONES[rand(ZONES.length)]; }
+function log(msg, cls='info') { const d=document.getElementById('log'); d.innerHTML+=`<div class="msg-${cls}">${msg}</div>`; d.scrollTop=d.scrollHeight; }
+
+function doMove() {
+  if(gameOver) return;
+  const dest = document.getElementById('move-select').value;
+  if(dest===player.zone){log('你已經在這裡了。','info');return;}
+  if(player.sp<15){log('體力不足，無法移動！','danger');return;}
+  player.sp-=15; player.zone=dest;
+  log(`你移動到了【${dest}】。`,'info');
+  checkEncounter(); turn++; botTurn(); checkDanger(); updateUI();
+}
+
+function doExplore() {
+  if(gameOver) return;
+  if(player.sp<10){log('體力不足，無法探索！','danger');return;}
+  player.sp-=10;
+  const r=rand(100);
+  if(r<30&&player.inv.length<4){
+    const item=ITEMS[rand(ITEMS.length)];
+    player.inv.push({...item});
+    log(`🔍 你發現了【${item.name}】！`,'item');
+  } else if(r<55&&player.inv.length<4){
+    const w=WEAPONS[rand(WEAPONS.length)];
+    player.inv.push({name:w.name,type:'weapon',atk:w.atk});
+    log(`🔍 你發現了武器【${w.name}】(攻擊+${w.atk})！`,'item');
+  } else if(r<75){
+    checkEncounter(true);
+  } else {
+    log('🔍 什麼都沒發現...','info');
+  }
+  turn++; botTurn(); checkDanger(); updateUI();
+}
+
+function doRest() {
+  if(gameOver) return;
+  const hpGain=15, spGain=25;
+  player.hp=Math.min(player.maxHp, player.hp+hpGain);
+  player.sp=Math.min(player.maxSp, player.sp+spGain);
+  log(`💤 你休息了一會。生命+${hpGain}，體力+${spGain}。`,'info');
+  if(rand(100)<20) checkEncounter(true);
+  turn++; botTurn(); checkDanger(); updateUI();
+}
+
+function doUseItem() {
+  if(gameOver) return;
+  if(player.inv.length===0){log('背包是空的！','info');return;}
+  const item=player.inv[0];
+  if(item.type==='heal'){player.hp=Math.min(player.maxHp,player.hp+item.val);log(`💊 使用【${item.name}】，生命+${item.val}。`,'item');}
+  else if(item.type==='sp'){player.sp=Math.min(player.maxSp,player.sp+item.val);log(`💊 使用【${item.name}】，體力+${item.val}。`,'item');}
+  else if(item.type==='def'){player.def+=item.val;log(`🛡️ 裝備【${item.name}】，防禦+${item.val}。`,'item');}
+  else if(item.type==='weapon'){player.weapon=item;player.atk=10+item.atk;log(`🗡️ 裝備【${item.name}】，攻擊力=${player.atk}。`,'item');}
+  player.inv.shift(); updateUI();
+}
+
+function checkEncounter(forced) {
+  const enemies=bots.filter(b=>b.alive&&b.zone===player.zone);
+  if(enemies.length===0) return;
+  if(!forced&&rand(100)>40) return;
+  const enemy=enemies[rand(enemies.length)];
+  log(`⚠️ 你遭遇了【${enemy.name}】！`,'combat');
+  combat(player, enemy);
+}
+
+function combat(a, b) {
+  const aDmg=Math.max(1, a.atk+a.prof/5 - b.def/2 + rand(8));
+  const bDmg=Math.max(1, b.atk+b.prof/5 - a.def/2 + rand(6));
+  const aFirst=rand(100)<55;
+  if(aFirst){
+    b.hp-=aDmg; log(`  你攻擊【${b.name}】造成 ${aDmg} 傷害！`,'combat');
+    if(b.hp<=0){b.alive=false;log(`  💀【${b.name}】被你擊殺！`,'combat');player.prof+=5;return;}
+    a.hp-=bDmg; log(`  【${b.name}】反擊造成 ${bDmg} 傷害！`,'combat');
+  } else {
+    a.hp-=bDmg; log(`  【${b.name}】先制攻擊！造成 ${bDmg} 傷害！`,'combat');
+    if(a.hp<=0){a.alive=false;endGame(false);return;}
+    b.hp-=aDmg; log(`  你反擊造成 ${aDmg} 傷害！`,'combat');
+    if(b.hp<=0){b.alive=false;log(`  💀【${b.name}】被你擊殺！`,'combat');player.prof+=5;}
+  }
+  if(a.hp<=0){a.alive=false;endGame(false);}
+}
+
+function botTurn() {
+  const alive=bots.filter(b=>b.alive);
+  alive.forEach(bot=>{
+    const action=rand(100);
+    if(action<30) bot.zone=randZone();
+    else if(action<50) bot.hp=Math.min(bot.maxHp,bot.hp+10);
+    else if(action<60) bot.sp=Math.min(bot.maxSp,bot.sp+15);
+    // bot vs bot combat
+    const targets=alive.filter(t=>t!==bot&&t.alive&&t.zone===bot.zone);
+    if(targets.length>0&&rand(100)<25){
+      const t=targets[rand(targets.length)];
+      const dmg=Math.max(1,bot.atk+bot.prof/5-t.def/2+rand(6));
+      t.hp-=dmg;
+      if(t.hp<=0){t.alive=false;log(`📢【${bot.name}】擊殺了【${t.name}】！`,'system');bot.prof+=5;}
+    }
+  });
+  if(dangerZones.length>0){
+    alive.forEach(bot=>{if(dangerZones.includes(bot.zone)){bot.zone=ZONES.filter(z=>!dangerZones.includes(z))[rand(ZONES.length-dangerZones.length)]||bot.zone;}});
+  }
+  checkWin();
+}
+
+function checkDanger() {
+  if(turn>0&&turn%nextDanger===0&&dangerZones.length<ZONES.length-2){
+    const safe=ZONES.filter(z=>!dangerZones.includes(z));
+    const newDanger=safe[rand(safe.length)];
+    dangerZones.push(newDanger);
+    log(`🚨 ═══ 禁區公告：【${newDanger}】已成為禁區！═══`,'danger');
+    if(player.zone===newDanger){player.hp-=30;log('⚠️ 你在禁區內！受到 30 傷害！快離開！','danger');}
+    bots.filter(b=>b.alive&&b.zone===newDanger).forEach(b=>{b.hp-=30;if(b.hp<=0){b.alive=false;log(`📢【${b.name}】死於禁區！`,'system');}});
+    nextDanger=Math.max(4,nextDanger-1);
+    checkWin();
+  }
+  if(dangerZones.includes(player.zone)&&player.alive){player.hp-=10;log('⚠️ 你仍在禁區！持續受到傷害！','danger');}
+  if(player.hp<=0&&player.alive){player.alive=false;endGame(false);}
+}
+
+function checkWin() {
+  const alive=bots.filter(b=>b.alive);
+  if(alive.length===0&&player.alive) endGame(true);
+}
+
+function endGame(win) {
+  gameOver=true;
+  const el=document.getElementById('game-over');
+  el.style.display='flex';
+  document.getElementById('go-text').className=win?'winner':'loser';
+  document.getElementById('go-text').textContent=win?'🏆 最後倖存者！你贏了！':'💀 你已死亡...';
+}
+
+function updateUI() {
+  document.getElementById('location').textContent=player.zone+(dangerZones.includes(player.zone)?' ⚠️禁區':'');
+  document.getElementById('alive-count').textContent=`${bots.filter(b=>b.alive).length+1} / ${bots.length+1}`;
+  document.getElementById('hp').textContent=`${player.hp}/${player.maxHp}`;
+  document.getElementById('sp').textContent=`${player.sp}/${player.maxSp}`;
+  document.getElementById('hp-bar').style.width=`${player.hp/player.maxHp*100}%`;
+  document.getElementById('sp-bar').style.width=`${player.sp/player.maxSp*100}%`;
+  document.getElementById('atk').textContent=player.atk;
+  document.getElementById('def').textContent=player.def;
+  document.getElementById('weapon').textContent=player.weapon?player.weapon.name:'空手';
+  document.getElementById('prof').textContent=player.prof;
+  // inventory
+  const invEl=document.getElementById('inv-list');
+  invEl.textContent=player.inv.length?player.inv.map(i=>i.name).join('、'):'空';
+  // move select
+  const sel=document.getElementById('move-select');
+  sel.innerHTML=ZONES.filter(z=>!dangerZones.includes(z)).map(z=>`<option value="${z}"${z===player.zone?' selected':''}>${z}${z===player.zone?' (目前)':''}</option>`).join('');
+  // survivors
+  const sl=document.getElementById('surv-list');
+  sl.innerHTML=bots.map(b=>`<span class="${b.alive?'':'dead'}">${b.name}${b.alive?'':'💀'}</span>`).join(' | ');
+  // disable buttons if dead
+  document.querySelectorAll('#actions button').forEach(b=>b.disabled=gameOver);
+}
+
+init();
+</script>
+</body>
+</html>
