@@ -32,6 +32,9 @@ h1 { text-align: center; color: #e94560; margin-bottom: 10px; font-size: 1.8em; 
 #game-over h2 { font-size: 3em; margin-bottom: 20px; }
 #game-over button { padding: 15px 40px; font-size: 1.2em; background: #e94560; border: none; color: white; border-radius: 5px; cursor: pointer; }
 .winner { color: #4ecca3; } .loser { color: #e94560; }
+#pickup-panel button { padding: 8px 12px; margin: 4px; background: #16213e; border: 1px solid #0f3460; color: #e0e0e0; border-radius: 4px; cursor: pointer; font-size: 0.85em; }
+#pickup-panel button:hover { background: #0f3460; border-color: #4ecca3; }
+#pickup-panel h3 { color: #4ecca3; margin-bottom: 8px; }
 </style>
 </head>
 <body>
@@ -47,11 +50,12 @@ h1 { text-align: center; color: #e94560; margin-bottom: 10px; font-size: 1.8em; 
 <div>🗡️ 武器：<span id="weapon">-</span></div>
 <div>🎯 熟練：<span id="prof">-</span></div>
 </div>
-<div id="inventory"><h3>🎒 背包</h3><div id="inv-list">空</div></div>
+<div id="inventory"><h3>🎒 背包 (<span id="inv-count">0</span>/6)</h3><div id="inv-list">空</div></div>
+<div id="pickup-panel" style="display:none;background:#1a3a2e;border:1px solid #4ecca3;border-radius:5px;padding:10px;margin-bottom:15px;"></div>
 <div id="log"></div>
-<select id="move-select"></select>
+<select id="move-select" onchange="onZoneSelect()"></select>
 <div id="actions">
-<button id="btn-move" onclick="doMove()">🚶 移動</button>
+<button id="btn-move" onclick="doMove()" style="display:none">🚶 移動</button>
 <button id="btn-explore" onclick="doExplore()">🔍 探索</button>
 <button id="btn-rest" onclick="doRest()">💤 休息</button>
 <button id="btn-use" onclick="doUseItem()">💊 使用道具</button>
@@ -92,12 +96,19 @@ function rand(n) { return Math.floor(Math.random()*n); }
 function randZone() { return ZONES[rand(ZONES.length)]; }
 function log(msg, cls='info') { const d=document.getElementById('log'); d.innerHTML+=`<div class="msg-${cls}">${msg}</div>`; d.scrollTop=d.scrollHeight; }
 
+function onZoneSelect() {
+  const dest = document.getElementById('move-select').value;
+  const btn = document.getElementById('btn-move');
+  btn.style.display = (dest !== player.zone) ? '' : 'none';
+}
+
 function doMove() {
   if(gameOver) return;
   const dest = document.getElementById('move-select').value;
-  if(dest===player.zone){log('你已經在這裡了。','info');return;}
+  if(dest===player.zone) return;
   if(player.sp<15){log('體力不足，無法移動！','danger');return;}
   player.sp-=15; player.zone=dest;
+  document.getElementById('btn-move').style.display='none';
   log(`你移動到了【${dest}】。`,'info');
   checkEncounter(); turn++; botTurn(); checkDanger(); updateUI();
 }
@@ -107,14 +118,24 @@ function doExplore() {
   if(player.sp<10){log('體力不足，無法探索！','danger');return;}
   player.sp-=10;
   const r=rand(100);
-  if(r<30&&player.inv.length<4){
-    const item=ITEMS[rand(ITEMS.length)];
-    player.inv.push({...item});
-    log(`🔍 你發現了【${item.name}】！`,'item');
-  } else if(r<55&&player.inv.length<4){
-    const w=WEAPONS[rand(WEAPONS.length)];
-    player.inv.push({name:w.name,type:'weapon',atk:w.atk});
-    log(`🔍 你發現了武器【${w.name}】(攻擊+${w.atk})！`,'item');
+  if(r<55){
+    // Generate found items (1~2 items to choose from)
+    let found = [];
+    const count = rand(2)+1;
+    for(let i=0;i<count;i++){
+      if(rand(100)<50){
+        const item=ITEMS[rand(ITEMS.length)];
+        found.push({...item});
+      } else {
+        const w=WEAPONS[rand(WEAPONS.length)];
+        found.push({name:w.name,type:'weapon',atk:w.atk});
+      }
+    }
+    if(found.length>0){
+      log(`🔍 你發現了：${found.map(i=>i.type==='weapon'?`【${i.name}】(攻擊+${i.atk})`:`【${i.name}】`).join('、')}`,'item');
+      showPickupUI(found);
+      return; // Don't advance turn until player picks
+    }
   } else if(r<75){
     checkEncounter(true);
   } else {
@@ -123,25 +144,142 @@ function doExplore() {
   turn++; botTurn(); checkDanger(); updateUI();
 }
 
+function showPickupUI(found) {
+  const el = document.getElementById('pickup-panel');
+  let html = '<h3>🎁 選擇要撿起的物品：</h3>';
+  found.forEach((item,i)=>{
+    const desc = item.type==='weapon'?`${item.name}(攻擊+${item.atk})`:
+                 item.type==='heal'?`${item.name}(生命+${item.val})`:
+                 item.type==='sp'?`${item.name}(體力+${item.val})`:
+                 `${item.name}(防禦+${item.val})`;
+    html+=`<button onclick="pickItem(${i})">${desc}</button> `;
+  });
+  html+=`<button onclick="pickItem(-1)">❌ 不撿</button>`;
+  el.innerHTML=html;
+  el.style.display='block';
+  el._found=found;
+  document.querySelectorAll('#actions button').forEach(b=>b.disabled=true);
+}
+
+function pickItem(idx) {
+  const el = document.getElementById('pickup-panel');
+  const found = el._found;
+  el.style.display='none';
+  
+  if(idx===-1){
+    log('你決定不撿。','info');
+  } else {
+    const item = found[idx];
+    if(player.inv.length>=6){
+      // Show swap UI
+      showSwapUI(item);
+      return;
+    }
+    player.inv.push(item);
+    log(`✅ 撿起了【${item.name}】。`,'item');
+  }
+  document.querySelectorAll('#actions button').forEach(b=>b.disabled=false);
+  turn++; botTurn(); checkDanger(); updateUI();
+}
+
+function showSwapUI(newItem) {
+  const el = document.getElementById('pickup-panel');
+  let html = `<h3>🎒 背包已滿！選擇要丟棄的道具來換取【${newItem.name}】：</h3>`;
+  player.inv.forEach((item,i)=>{
+    html+=`<button onclick="swapItem(${i})">${item.name}</button> `;
+  });
+  html+=`<button onclick="cancelSwap()">❌ 放棄撿取</button>`;
+  el.innerHTML=html;
+  el.style.display='block';
+  el._newItem=newItem;
+}
+
+function swapItem(idx) {
+  const el = document.getElementById('pickup-panel');
+  const newItem = el._newItem;
+  const old = player.inv[idx];
+  player.inv[idx] = newItem;
+  log(`🔄 丟棄【${old.name}】，撿起【${newItem.name}】。`,'item');
+  el.style.display='none';
+  document.querySelectorAll('#actions button').forEach(b=>b.disabled=false);
+  turn++; botTurn(); checkDanger(); updateUI();
+}
+
+function cancelSwap() {
+  const el = document.getElementById('pickup-panel');
+  el.style.display='none';
+  log('你決定不撿。','info');
+  document.querySelectorAll('#actions button').forEach(b=>b.disabled=false);
+  turn++; botTurn(); checkDanger(); updateUI();
+}
+
 function doRest() {
   if(gameOver) return;
-  const hpGain=15, spGain=25;
-  player.hp=Math.min(player.maxHp, player.hp+hpGain);
-  player.sp=Math.min(player.maxSp, player.sp+spGain);
-  log(`💤 你休息了一會。生命+${hpGain}，體力+${spGain}。`,'info');
-  if(rand(100)<20) checkEncounter(true);
+  if(player.resting) {log('你正在休息中...','info');return;}
+  player.resting = true;
+  document.getElementById('btn-rest').disabled = true;
+  document.getElementById('btn-rest').textContent = '💤 休息中(30s)';
+  log('💤 你開始休息...30秒後恢復。','info');
+  let countdown = 30;
+  player.restTimer = setInterval(()=>{
+    countdown--;
+    document.getElementById('btn-rest').textContent = `💤 休息中(${countdown}s)`;
+    if(countdown <= 0){
+      clearInterval(player.restTimer);
+      player.resting = false;
+      player.hp = Math.min(player.maxHp, player.hp + 10);
+      player.sp = Math.min(player.maxSp, player.sp + 10);
+      log('💤 休息完畢！生命+10，體力+10。','item');
+      document.getElementById('btn-rest').disabled = gameOver;
+      document.getElementById('btn-rest').textContent = '💤 休息';
+      updateUI();
+    }
+  }, 1000);
   turn++; botTurn(); checkDanger(); updateUI();
 }
 
 function doUseItem() {
   if(gameOver) return;
   if(player.inv.length===0){log('背包是空的！','info');return;}
-  const item=player.inv[0];
+  const el = document.getElementById('pickup-panel');
+  let html = '<h3>選擇要使用/裝備的道具：</h3>';
+  player.inv.forEach((item,i)=>{
+    const desc = item.type==='weapon'?`🗡️${item.name}(+${item.atk})`:
+                 item.type==='heal'?`💊${item.name}(HP+${item.val})`:
+                 item.type==='sp'?`⚡${item.name}(SP+${item.val})`:
+                 `🛡️${item.name}(DEF+${item.val})`;
+    html+=`<button onclick="useItemAt(${i})">${desc}</button> `;
+  });
+  html+='<br><br><b>丟棄：</b>';
+  player.inv.forEach((item,i)=>{
+    html+=`<button onclick="discardItem(${i})" style="background:#4a1a1a;border-color:#e94560;">🗑️${item.name}</button> `;
+  });
+  html+=`<br><br><button onclick="closePanel()">↩️ 取消</button>`;
+  el.innerHTML=html;
+  el.style.display='block';
+  document.querySelectorAll('#actions button').forEach(b=>b.disabled=true);
+}
+
+function useItemAt(idx) {
+  const item=player.inv[idx];
   if(item.type==='heal'){player.hp=Math.min(player.maxHp,player.hp+item.val);log(`💊 使用【${item.name}】，生命+${item.val}。`,'item');}
-  else if(item.type==='sp'){player.sp=Math.min(player.maxSp,player.sp+item.val);log(`💊 使用【${item.name}】，體力+${item.val}。`,'item');}
+  else if(item.type==='sp'){player.sp=Math.min(player.maxSp,player.sp+item.val);log(`⚡ 使用【${item.name}】，體力+${item.val}。`,'item');}
   else if(item.type==='def'){player.def+=item.val;log(`🛡️ 裝備【${item.name}】，防禦+${item.val}。`,'item');}
   else if(item.type==='weapon'){player.weapon=item;player.atk=10+item.atk;log(`🗡️ 裝備【${item.name}】，攻擊力=${player.atk}。`,'item');}
-  player.inv.shift(); updateUI();
+  player.inv.splice(idx,1);
+  closePanel(); updateUI();
+}
+
+function discardItem(idx) {
+  const item=player.inv[idx];
+  player.inv.splice(idx,1);
+  log(`🗑️ 丟棄了【${item.name}】。`,'info');
+  closePanel(); updateUI();
+}
+
+function closePanel() {
+  document.getElementById('pickup-panel').style.display='none';
+  document.querySelectorAll('#actions button').forEach(b=>b.disabled=gameOver);
 }
 
 function checkEncounter(forced) {
@@ -233,10 +371,12 @@ function updateUI() {
   document.getElementById('prof').textContent=player.prof;
   // inventory
   const invEl=document.getElementById('inv-list');
-  invEl.textContent=player.inv.length?player.inv.map(i=>i.name).join('、'):'空';
+  document.getElementById('inv-count').textContent=player.inv.length;
+  invEl.textContent=player.inv.length?player.inv.map(i=>i.type==='weapon'?`${i.name}(+${i.atk})`:i.name).join('、'):'空';
   // move select
   const sel=document.getElementById('move-select');
   sel.innerHTML=ZONES.filter(z=>!dangerZones.includes(z)).map(z=>`<option value="${z}"${z===player.zone?' selected':''}>${z}${z===player.zone?' (目前)':''}</option>`).join('');
+  document.getElementById('btn-move').style.display='none';
   // survivors
   const sl=document.getElementById('surv-list');
   sl.innerHTML=bots.map(b=>`<span class="${b.alive?'':'dead'}">${b.name}${b.alive?'':'💀'}</span>`).join(' | ');
