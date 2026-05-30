@@ -48,6 +48,8 @@ h1 { text-align: center; color: #e94560; margin-bottom: 10px; font-size: 1.8em; 
 <div class="atk">⚔️ 攻擊：<span id="atk">-</span></div>
 <div class="def">🛡️ 防禦：<span id="def">-</span></div>
 <div>🗡️ 武器：<span id="weapon">-</span></div>
+<div>🛡️ 防具：<span id="armor">-</span></div>
+<div>📊 等級：<span id="level">-</span></div>
 <div>🎯 熟練：<span id="prof">-</span></div>
 </div>
 <div id="inventory"><h3>🎒 背包 (<span id="inv-count">0</span>/6)</h3><div id="inv-list">空</div></div>
@@ -67,9 +69,11 @@ h1 { text-align: center; color: #e94560; margin-bottom: 10px; font-size: 1.8em; 
 <script>
 const ZONES = ['廢棄醫院','森林小屋','海岸碼頭','山頂神社','商店街','學校','發電廠','地下隧道','公園廣場','軍事基地'];
 const WEAPONS = [
-{name:'小刀',atk:8,prof:'斬'},{name:'球棒',atk:12,prof:'殴'},{name:'手槍',atk:18,prof:'射'},
-{name:'步槍',atk:25,prof:'射'},{name:'武士刀',atk:22,prof:'斬'},{name:'鐵管',atk:10,prof:'殴'},
-{name:'弓箭',atk:15,prof:'投'},{name:'手榴彈',atk:30,prof:'爆'}
+{name:'鐵管',atk:8,cat:'殴'},{name:'球棒',atk:12,cat:'殴'},{name:'拳套',atk:15,cat:'殴'},
+{name:'小刀',atk:10,cat:'斬'},{name:'武士刀',atk:22,cat:'斬'},{name:'斧頭',atk:18,cat:'斬'},
+{name:'手槍',atk:18,cat:'射'},{name:'步槍',atk:25,cat:'射'},{name:'弓',atk:14,cat:'射'},
+{name:'飛刀',atk:12,cat:'投'},{name:'手裏劍',atk:10,cat:'投'},{name:'石頭',atk:6,cat:'投'},
+{name:'手榴彈',atk:30,cat:'爆'},{name:'炸藥',atk:35,cat:'爆'},{name:'地雷',atk:28,cat:'爆'}
 ];
 const ITEMS = [
 {name:'繃帶',type:'heal',val:20},{name:'急救包',type:'heal',val:50},{name:'能量飲料',type:'sp',val:30},
@@ -81,10 +85,10 @@ let player, bots, turn, dangerZones, nextDanger, gameOver;
 
 function init() {
   gameOver = false; turn = 0; dangerZones = []; nextDanger = 8;
-  player = { name: '你', hp: 100, maxHp: 100, sp: 100, maxSp: 100, atk: 10, def: 5, zone: randZone(), weapon: null, prof: 0, inv: [], alive: true };
+  player = { name: '你', hp: 100, maxHp: 100, sp: 100, maxSp: 100, atk: 10, def: 5, zone: randZone(), weapon: null, armor: null, prof: {殴:0,斬:0,射:0,投:0,爆:0}, lv: 1, exp: 0, inv: [], alive: true };
   bots = [];
   for (let i = 0; i < 12; i++) {
-    bots.push({ name: NAMES[i], hp: 80+rand(40), maxHp: 80+rand(40), sp: 80, maxSp: 80, atk: 8+rand(10), def: 3+rand(8), zone: randZone(), weapon: rand(3)>0?WEAPONS[rand(WEAPONS.length)]:null, prof: rand(30), inv: [], alive: true });
+    bots.push({ name: NAMES[i], hp: 80+rand(40), maxHp: 80+rand(40), sp: 80, maxSp: 80, atk: 8+rand(10), def: 3+rand(8), zone: randZone(), weapon: rand(3)>0?WEAPONS[rand(WEAPONS.length)]:null, prof: {殴:rand(20),斬:rand(20),射:rand(20),投:rand(20),爆:rand(20)}, lv:1+rand(3), exp:0, inv: [], alive: true });
   }
   log('═══ 遊戲開始！大逃殺倒數計時 ═══','system');
   log(`你被投放到【${player.zone}】，共 ${bots.length+1} 人參戰。`, 'system');
@@ -128,11 +132,11 @@ function doExplore() {
         found.push({...item});
       } else {
         const w=WEAPONS[rand(WEAPONS.length)];
-        found.push({name:w.name,type:'weapon',atk:w.atk});
+        found.push({name:w.name,type:'weapon',atk:w.atk,cat:w.cat});
       }
     }
     if(found.length>0){
-      log(`🔍 你發現了：${found.map(i=>i.type==='weapon'?`【${i.name}】(攻擊+${i.atk})`:`【${i.name}】`).join('、')}`,'item');
+      log(`🔍 你發現了：${found.map(i=>i.type==='weapon'?`【${i.name}】[${i.cat}系](攻擊+${i.atk})`:`【${i.name}】`).join('、')}`,'item');
       showPickupUI(found);
       return; // Don't advance turn until player picks
     }
@@ -148,7 +152,7 @@ function showPickupUI(found) {
   const el = document.getElementById('pickup-panel');
   let html = '<h3>🎁 選擇要撿起的物品：</h3>';
   found.forEach((item,i)=>{
-    const desc = item.type==='weapon'?`${item.name}(攻擊+${item.atk})`:
+    const desc = item.type==='weapon'?`${item.name}[${item.cat}系](攻擊+${item.atk})`:
                  item.type==='heal'?`${item.name}(生命+${item.val})`:
                  item.type==='sp'?`${item.name}(體力+${item.val})`:
                  `${item.name}(防禦+${item.val})`;
@@ -215,26 +219,24 @@ function cancelSwap() {
 
 function doRest() {
   if(gameOver) return;
-  if(player.resting) {log('你正在休息中...','info');return;}
+  if(player.resting) {
+    // 停止休息
+    clearInterval(player.restTimer);
+    player.resting = false;
+    document.getElementById('btn-rest').textContent = '💤 休息';
+    log('你停止了休息。','info');
+    return;
+  }
   player.resting = true;
-  document.getElementById('btn-rest').disabled = true;
-  document.getElementById('btn-rest').textContent = '💤 休息中(30s)';
-  log('💤 你開始休息...30秒後恢復。','info');
-  let countdown = 30;
+  document.getElementById('btn-rest').textContent = '⏹️ 停止休息';
+  log('💤 你開始休息...每30秒恢復生命+10、體力+10。','info');
   player.restTimer = setInterval(()=>{
-    countdown--;
-    document.getElementById('btn-rest').textContent = `💤 休息中(${countdown}s)`;
-    if(countdown <= 0){
-      clearInterval(player.restTimer);
-      player.resting = false;
-      player.hp = Math.min(player.maxHp, player.hp + 10);
-      player.sp = Math.min(player.maxSp, player.sp + 10);
-      log('💤 休息完畢！生命+10，體力+10。','item');
-      document.getElementById('btn-rest').disabled = gameOver;
-      document.getElementById('btn-rest').textContent = '💤 休息';
-      updateUI();
-    }
-  }, 1000);
+    if(gameOver||!player.alive){clearInterval(player.restTimer);player.resting=false;return;}
+    player.hp = Math.min(player.maxHp, player.hp + 10);
+    player.sp = Math.min(player.maxSp, player.sp + 10);
+    log('💤 休息恢復：生命+10，體力+10。','item');
+    updateUI();
+  }, 30000);
   turn++; botTurn(); checkDanger(); updateUI();
 }
 
@@ -242,19 +244,15 @@ function doUseItem() {
   if(gameOver) return;
   if(player.inv.length===0){log('背包是空的！','info');return;}
   const el = document.getElementById('pickup-panel');
-  let html = '<h3>選擇要使用/裝備的道具：</h3>';
+  let html = '<h3>🎒 道具欄：</h3>';
   player.inv.forEach((item,i)=>{
-    const desc = item.type==='weapon'?`🗡️${item.name}(+${item.atk})`:
+    const desc = item.type==='weapon'?`🗡️${item.name}[${item.cat}系](+${item.atk})`:
                  item.type==='heal'?`💊${item.name}(HP+${item.val})`:
                  item.type==='sp'?`⚡${item.name}(SP+${item.val})`:
                  `🛡️${item.name}(DEF+${item.val})`;
-    html+=`<button onclick="useItemAt(${i})">${desc}</button> `;
+    html+=`<div style="margin:4px 0;">${desc} <button onclick="useItemAt(${i})">✅ 使用</button> <button onclick="discardItem(${i})" style="background:#4a1a1a;border-color:#e94560;">🗑️ 丟棄</button></div>`;
   });
-  html+='<br><br><b>丟棄：</b>';
-  player.inv.forEach((item,i)=>{
-    html+=`<button onclick="discardItem(${i})" style="background:#4a1a1a;border-color:#e94560;">🗑️${item.name}</button> `;
-  });
-  html+=`<br><br><button onclick="closePanel()">↩️ 取消</button>`;
+  html+=`<br><button onclick="closePanel()">↩️ 關閉</button>`;
   el.innerHTML=html;
   el.style.display='block';
   document.querySelectorAll('#actions button').forEach(b=>b.disabled=true);
@@ -262,11 +260,20 @@ function doUseItem() {
 
 function useItemAt(idx) {
   const item=player.inv[idx];
-  if(item.type==='heal'){player.hp=Math.min(player.maxHp,player.hp+item.val);log(`💊 使用【${item.name}】，生命+${item.val}。`,'item');}
-  else if(item.type==='sp'){player.sp=Math.min(player.maxSp,player.sp+item.val);log(`⚡ 使用【${item.name}】，體力+${item.val}。`,'item');}
-  else if(item.type==='def'){player.def+=item.val;log(`🛡️ 裝備【${item.name}】，防禦+${item.val}。`,'item');}
-  else if(item.type==='weapon'){player.weapon=item;player.atk=10+item.atk;log(`🗡️ 裝備【${item.name}】，攻擊力=${player.atk}。`,'item');}
-  player.inv.splice(idx,1);
+  if(item.type==='heal'){player.hp=Math.min(player.maxHp,player.hp+item.val);log(`💊 使用【${item.name}】，生命+${item.val}。`,'item');player.inv.splice(idx,1);}
+  else if(item.type==='sp'){player.sp=Math.min(player.maxSp,player.sp+item.val);log(`⚡ 使用【${item.name}】，體力+${item.val}。`,'item');player.inv.splice(idx,1);}
+  else if(item.type==='def'){
+    // 如果已有同類型防具，放回背包
+    if(player.armor){player.inv.splice(idx,1,player.armor);}else{player.inv.splice(idx,1);}
+    player.armor=item;player.def=5+item.val;
+    log(`🛡️ 裝備【${item.name}】，防禦=${player.def}。`,'item');
+  }
+  else if(item.type==='weapon'){
+    // 如果已有武器，放回背包
+    if(player.weapon){player.inv.splice(idx,1,player.weapon);}else{player.inv.splice(idx,1);}
+    player.weapon=item;player.atk=10+item.atk;
+    log(`🗡️ 裝備【${item.name}】，攻擊力=${player.atk}。`,'item');
+  }
   closePanel(); updateUI();
 }
 
@@ -291,19 +298,48 @@ function checkEncounter(forced) {
   combat(player, enemy);
 }
 
+function getProf(entity) {
+  if(!entity.weapon) return 0;
+  const cat = entity.weapon.cat || '殴';
+  return (typeof entity.prof === 'object') ? (entity.prof[cat]||0) : entity.prof;
+}
+
+function getTotalAtk(entity) {
+  return entity.atk + (entity.weapon?entity.weapon.atk:0) + Math.floor(getProf(entity)/3);
+}
+
+function gainExp(entity, amount) {
+  if(entity !== player) return;
+  entity.exp += amount;
+  const needed = entity.lv * 15;
+  while(entity.exp >= needed) {
+    entity.exp -= needed;
+    entity.lv++;
+    entity.maxHp += 15;
+    entity.hp = Math.min(entity.maxHp, entity.hp + 15);
+    entity.maxSp += 10;
+    entity.sp = Math.min(entity.maxSp, entity.sp + 10);
+    entity.atk += 2;
+    entity.def += 1;
+    log(`⬆️ 升級！等級 ${entity.lv}！HP上限+15、SP上限+10、攻擊+2、防禦+1`,'system');
+  }
+}
+
 function combat(a, b) {
-  const aDmg=Math.max(1, a.atk+a.prof/5 - b.def/2 + rand(8));
-  const bDmg=Math.max(1, b.atk+b.prof/5 - a.def/2 + rand(6));
+  const aDmg=Math.max(1, getTotalAtk(a) - b.def/2 + rand(8));
+  const bDmg=Math.max(1, getTotalAtk(b) - a.def/2 + rand(6));
   const aFirst=rand(100)<55;
   if(aFirst){
     b.hp-=aDmg; log(`  你攻擊【${b.name}】造成 ${aDmg} 傷害！`,'combat');
-    if(b.hp<=0){b.alive=false;log(`  💀【${b.name}】被你擊殺！`,'combat');player.prof+=5;return;}
+    if(a.weapon&&a===player){const cat=a.weapon.cat;a.prof[cat]=(a.prof[cat]||0)+1+rand(2);}
+    if(b.hp<=0){b.alive=false;log(`  💀【${b.name}】被你擊殺！`,'combat');gainExp(a,10+b.lv*3);return;}
     a.hp-=bDmg; log(`  【${b.name}】反擊造成 ${bDmg} 傷害！`,'combat');
   } else {
     a.hp-=bDmg; log(`  【${b.name}】先制攻擊！造成 ${bDmg} 傷害！`,'combat');
     if(a.hp<=0){a.alive=false;endGame(false);return;}
     b.hp-=aDmg; log(`  你反擊造成 ${aDmg} 傷害！`,'combat');
-    if(b.hp<=0){b.alive=false;log(`  💀【${b.name}】被你擊殺！`,'combat');player.prof+=5;}
+    if(a.weapon&&a===player){const cat=a.weapon.cat;a.prof[cat]=(a.prof[cat]||0)+1+rand(2);}
+    if(b.hp<=0){b.alive=false;log(`  💀【${b.name}】被你擊殺！`,'combat');gainExp(a,10+b.lv*3);}
   }
   if(a.hp<=0){a.alive=false;endGame(false);}
 }
@@ -315,13 +351,12 @@ function botTurn() {
     if(action<30) bot.zone=randZone();
     else if(action<50) bot.hp=Math.min(bot.maxHp,bot.hp+10);
     else if(action<60) bot.sp=Math.min(bot.maxSp,bot.sp+15);
-    // bot vs bot combat
     const targets=alive.filter(t=>t!==bot&&t.alive&&t.zone===bot.zone);
     if(targets.length>0&&rand(100)<25){
       const t=targets[rand(targets.length)];
-      const dmg=Math.max(1,bot.atk+bot.prof/5-t.def/2+rand(6));
+      const dmg=Math.max(1,getTotalAtk(bot)-t.def/2+rand(6));
       t.hp-=dmg;
-      if(t.hp<=0){t.alive=false;log(`📢【${bot.name}】擊殺了【${t.name}】！`,'system');bot.prof+=5;}
+      if(t.hp<=0){t.alive=false;log(`📢【${bot.name}】擊殺了【${t.name}】！`,'system');bot.lv++;}
     }
   });
   if(dangerZones.length>0){
@@ -367,12 +402,14 @@ function updateUI() {
   document.getElementById('sp-bar').style.width=`${player.sp/player.maxSp*100}%`;
   document.getElementById('atk').textContent=player.atk;
   document.getElementById('def').textContent=player.def;
-  document.getElementById('weapon').textContent=player.weapon?player.weapon.name:'空手';
-  document.getElementById('prof').textContent=player.prof;
+  document.getElementById('weapon').textContent=player.weapon?`${player.weapon.name}[${player.weapon.cat}系]`:'空手';
+  document.getElementById('armor').textContent=player.armor?player.armor.name:'無';
+  document.getElementById('level').textContent=`Lv.${player.lv} (EXP:${player.exp}/${player.lv*15})`;
+  document.getElementById('prof').textContent=`殴:${player.prof.殴} 斬:${player.prof.斬} 射:${player.prof.射} 投:${player.prof.投} 爆:${player.prof.爆}`;
   // inventory
   const invEl=document.getElementById('inv-list');
   document.getElementById('inv-count').textContent=player.inv.length;
-  invEl.textContent=player.inv.length?player.inv.map(i=>i.type==='weapon'?`${i.name}(+${i.atk})`:i.name).join('、'):'空';
+  invEl.textContent=player.inv.length?player.inv.map(i=>i.type==='weapon'?`${i.name}[${i.cat}]`:i.name).join('、'):'空';
   // move select
   const sel=document.getElementById('move-select');
   sel.innerHTML=ZONES.filter(z=>!dangerZones.includes(z)).map(z=>`<option value="${z}"${z===player.zone?' selected':''}>${z}${z===player.zone?' (目前)':''}</option>`).join('');
