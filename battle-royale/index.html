@@ -223,18 +223,29 @@ function doRest() {
     // 停止休息
     clearInterval(player.restTimer);
     player.resting = false;
+    const hpGained = player.hp - player.restStartHp;
+    const spGained = player.sp - player.restStartSp;
     document.getElementById('btn-rest').textContent = '💤 休息';
-    log('你停止了休息。','info');
+    document.getElementById('btn-explore').disabled = false;
+    document.getElementById('btn-use').disabled = false;
+    document.getElementById('move-select').disabled = false;
+    log(`你停止了休息。共恢復生命 +${hpGained}，體力 +${spGained}。`,'item');
     return;
   }
   player.resting = true;
+  player.restStartHp = player.hp;
+  player.restStartSp = player.sp;
   document.getElementById('btn-rest').textContent = '⏹️ 停止休息';
-  log('💤 你開始休息...每30秒恢復生命+10、體力+10。','info');
+  document.getElementById('btn-explore').disabled = true;
+  document.getElementById('btn-use').disabled = true;
+  document.getElementById('btn-move').style.display = 'none';
+  document.getElementById('move-select').disabled = true;
+  log('💤 你開始休息...','info');
   player.restTimer = setInterval(()=>{
     if(gameOver||!player.alive){clearInterval(player.restTimer);player.resting=false;return;}
+    if(player.hp>=player.maxHp&&player.sp>=player.maxSp) return;
     player.hp = Math.min(player.maxHp, player.hp + 10);
     player.sp = Math.min(player.maxSp, player.sp + 10);
-    log('💤 休息恢復：生命+10，體力+10。','item');
     updateUI();
   }, 30000);
   turn++; botTurn(); checkDanger(); updateUI();
