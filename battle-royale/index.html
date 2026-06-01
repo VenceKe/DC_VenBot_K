@@ -108,6 +108,7 @@ function onZoneSelect() {
 
 function doMove() {
   if(gameOver) return;
+  if(player.resting){log('你正在休息中，請先停止休息。','danger');return;}
   const dest = document.getElementById('move-select').value;
   if(dest===player.zone) return;
   if(player.sp<15){log('體力不足，無法移動！','danger');return;}
@@ -119,6 +120,7 @@ function doMove() {
 
 function doExplore() {
   if(gameOver) return;
+  if(player.resting){log('你正在休息中，請先停止休息。','danger');return;}
   if(player.sp<10){log('體力不足，無法探索！','danger');return;}
   player.sp-=10;
   const r=rand(100);
@@ -253,6 +255,7 @@ function doRest() {
 
 function doUseItem() {
   if(gameOver) return;
+  if(player.resting){log('你正在休息中，請先停止休息。','danger');return;}
   if(player.inv.length===0){log('背包是空的！','info');return;}
   const el = document.getElementById('pickup-panel');
   let html = '<h3>🎒 道具欄：</h3>';
